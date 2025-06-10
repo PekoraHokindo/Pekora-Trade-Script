@@ -29,5 +29,5 @@ Then go back to the pekora.zip/my/trades.aspx site and repeat the clicking on th
 Activate the script [Named Pekora Rap Calculator]
 Reload the page [click the swriling arrow in the left top corner]
 
-Enjoy.
+Enjoy
 
