@@ -1,0 +1,270 @@
+// ==UserScript==
+// @name         Pekora Rap Calculator
+// @namespace    http://tampermonkey.net/
+// @version      1.5
+// @description  Pekora.zip thing, sigmud
+// @match        *://*.pekora.zip/My/Trades.aspx*
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function () {
+    'use strict';
+
+    GM_addStyle(`
+        .hokindo-calculator {
+            position: fixed;
+            top: 30px;
+            right: 30px;
+            width: 280px;
+            min-width: 200px;
+            min-height: 160px;
+            resize: both;
+            overflow: auto;
+            background: #0d001a;
+            border: 2px solid #cd0074;
+            color: white;
+            padding: 1.25em 1.25em 1.25em 1.25em;
+            font-family: 'Segoe UI', sans-serif;
+            border-radius: 14px;
+            box-shadow: 0 0 20px #ff2b95;
+            z-index: 9999;
+            cursor: grab;
+            user-select: none;
+            pointer-events: auto;
+            font-size: 1rem;
+        }
+        .hokindo-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 0 8px #ff2b95;
+            margin-bottom: 0.7em;
+            cursor: grab;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .hokindo-result {
+            margin: 0.3em 0;
+            font-size: 1.1em;
+            color: white;
+            text-shadow: 0 0 6px #ff2b95;
+            user-select: text;
+            cursor: default;
+        }
+        .hokindo-footer {
+            text-align: center;
+            margin-top: 1em;
+            font-size: 0.85em;
+            color: white;
+            text-shadow: 0 0 5px #cd0074;
+            user-select: none;
+        }
+        .hokindo-toggle-btn {
+            background: #cd0074;
+            border: none;
+            color: white;
+            font-weight: bold;
+            border-radius: 6px;
+            padding: 0 8px;
+            cursor: pointer;
+            user-select: none;
+            font-size: 0.9em;
+            box-shadow: 0 0 8px #ff2b95;
+            transition: background 0.3s ease;
+        }
+        .hokindo-toggle-btn:hover {
+            background: #ff2b95;
+        }
+        .hokindo-watermark {
+            position: fixed;
+            bottom: 15px;
+            left: 15px;
+            background: #0d001a;
+            border: 1.5px solid #cd0074;
+            color: white;
+            padding: 5px 12px;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 0.85rem;
+            border-radius: 8px;
+            box-shadow: 0 0 12px #ff2b95;
+            cursor: grab;
+            user-select: none;
+            z-index: 10000;
+            width: max-content;
+            max-width: 200px;
+        }
+    `);
+
+    let panel = null;
+    let watermark = null;
+    let contentContainer = null;
+    let isVisible = true;
+
+    function parseRAP(text) {
+        const match = /\b(\d+)\b/.exec(text);
+        return match ? parseInt(match[1]) : 0;
+    }
+
+    function extractTradeValues() {
+        // Find all .robuxLabel-0-2-131 spans on page (likely two)
+        const rapElements = Array.from(document.querySelectorAll('span.robuxLabel-0-2-131'));
+        if (rapElements.length < 2) return { giveRAP: 0, receiveRAP: 0 };
+
+        // First one is usually "You Give", second "You Receive"
+        let giveRAP = parseRAP(rapElements[0].textContent);
+        let receiveRAP = parseRAP(rapElements[1].textContent);
+
+        return { giveRAP, receiveRAP };
+    }
+
+    function createOrUpdatePanel(giveRAP, receiveRAP) {
+        const diff = receiveRAP - giveRAP;
+        let profitRatio = 0;
+        if (giveRAP > 0) profitRatio = (diff / giveRAP) * 100;
+
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.className = 'hokindo-calculator';
+            panel.style.fontSize = '1rem';
+
+            panel.innerHTML = `
+                <div class="hokindo-title" id="hokindo-drag">
+                    Hokindo Value Checker
+                    <button class="hokindo-toggle-btn" id="hokindo-toggle-btn">Hide</button>
+                </div>
+                <div id="hokindo-content">
+                    <div class="hokindo-result" id="hokindo-give">RAP You Give: ${giveRAP}</div>
+                    <div class="hokindo-result" id="hokindo-get">RAP You Get: ${receiveRAP}</div>
+                    <div class="hokindo-result" id="hokindo-total">
+                        Total: <span id="hokindo-diff" style="color: ${diff >= 0 ? '#88ff88' : '#ff6666'}; text-shadow: 0 0 5px ${diff >= 0 ? '#88ff88' : '#ff6666'};">
+                            ${diff >= 0 ? '+' : ''}${diff}
+                        </span>
+                    </div>
+                    <div class="hokindo-result" id="hokindo-ratio" style="color: #ff66cc; text-shadow: 0 0 8px #ff66cc;">
+                        Profit Ratio: ${profitRatio.toFixed(2)}%
+                    </div>
+                </div>
+                <div class="hokindo-footer">Hokindo Value Checker</div>
+            `;
+
+            document.body.appendChild(panel);
+            contentContainer = panel.querySelector('#hokindo-content');
+            makeDraggable(panel, panel.querySelector('#hokindo-drag'));
+
+            // Toggle button event
+            panel.querySelector('#hokindo-toggle-btn').addEventListener('click', () => {
+                isVisible = !isVisible;
+                if (isVisible) {
+                    contentContainer.style.display = 'block';
+                    panel.querySelector('#hokindo-toggle-btn').textContent = 'Hide';
+                    panel.style.resize = 'both';
+                } else {
+                    contentContainer.style.display = 'none';
+                    panel.querySelector('#hokindo-toggle-btn').textContent = 'Show';
+                    panel.style.resize = 'none';
+                }
+            });
+
+            // ResizeObserver for scaling text
+            const ro = new ResizeObserver(() => scaleTextWithPanel());
+            ro.observe(panel);
+        } else {
+            panel.querySelector('#hokindo-give').textContent = `RAP You Give: ${giveRAP}`;
+            panel.querySelector('#hokindo-get').textContent = `RAP You Get: ${receiveRAP}`;
+            const diffEl = panel.querySelector('#hokindo-diff');
+            diffEl.textContent = `${diff >= 0 ? '+' : ''}${diff}`;
+            diffEl.style.color = diff >= 0 ? '#88ff88' : '#ff6666';
+            diffEl.style.textShadow = diff >= 0 ? '0 0 5px #88ff88' : '0 0 5px #ff6666';
+
+            const ratioEl = panel.querySelector('#hokindo-ratio');
+            ratioEl.textContent = `Profit Ratio: ${profitRatio.toFixed(2)}%`;
+        }
+    }
+
+    function scaleTextWithPanel() {
+        if (!panel) return;
+        const baseWidth = 280;
+        const width = panel.clientWidth;
+        let scale = width / baseWidth;
+        scale = Math.min(Math.max(scale, 0.7), 2.5);
+        panel.style.fontSize = `${scale}rem`;
+    }
+
+    function debounce(func, delay = 300) {
+        let timeout;
+        return () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(func, delay);
+        };
+    }
+
+    function updatePanel() {
+        const { giveRAP, receiveRAP } = extractTradeValues();
+        createOrUpdatePanel(giveRAP, receiveRAP);
+    }
+
+    function makeDraggable(element, handle) {
+        let isDragging = false;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        handle.style.userSelect = 'none';
+        handle.style.webkitUserSelect = 'none';
+
+        handle.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            offsetX = e.clientX - element.getBoundingClientRect().left;
+            offsetY = e.clientY - element.getBoundingClientRect().top;
+            element.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            let newX = e.clientX - offsetX;
+            let newY = e.clientY - offsetY;
+
+            newX = Math.min(window.innerWidth - element.offsetWidth, Math.max(0, newX));
+            newY = Math.min(window.innerHeight - element.offsetHeight, Math.max(0, newY));
+
+            element.style.left = `${newX}px`;
+            element.style.top = `${newY}px`;
+            element.style.right = 'auto';
+            element.style.bottom = 'auto';
+            element.style.position = 'fixed';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                element.style.cursor = 'grab';
+            }
+        });
+    }
+
+    function createWatermark() {
+        if (watermark) return;
+        watermark = document.createElement('div');
+        watermark.className = 'hokindo-watermark';
+        watermark.textContent = 'Made by Hokindo LLC';
+        document.body.appendChild(watermark);
+        makeDraggable(watermark, watermark);
+        watermark.style.fontSize = '0.85rem';
+    }
+
+    const debouncedUpdate = debounce(updatePanel, 500);
+    const observer = new MutationObserver(debouncedUpdate);
+
+    window.addEventListener('load', () => {
+        setTimeout(() => {
+            updatePanel();
+            createWatermark();
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true,
+            });
+        }, 2000);
+    });
+
+})();
