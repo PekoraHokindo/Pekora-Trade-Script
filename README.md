@@ -9,9 +9,9 @@
 
 Credits
 
-Hokindo
-Trader
-Omen
+Hokindo,
+Trader,
+Omen,
 Jacob [doing NOTHING exept not making a proper extension (not really but since value, demand etc. Was reset his extension is USELESS :sob:)
 
 
